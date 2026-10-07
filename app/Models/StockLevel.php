@@ -36,6 +36,11 @@ class StockLevel extends Model
 
     public function isLowStock(): bool
     {
-        return $this->available <= $this->reorder_level;
+        return $this->reorder_level > 0 && $this->available > 0 && $this->available <= $this->reorder_level;
+    }
+
+    public function isOutOfStock(): bool
+    {
+        return $this->available <= 0;
     }
 }
