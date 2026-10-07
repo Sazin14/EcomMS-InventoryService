@@ -1,0 +1,23 @@
+name: Mirror GitHub to GitLab
+
+on:
+  push:
+  delete:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Mirror repository
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+        run: |
+          git clone --mirror https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git repo.git
+
+          cd repo.git
+
+          git remote set-url --push origin https://oauth2:${GITLAB_TOKEN}@gitlab.com/ecomms1/ecomms-inventoryservice.git
+
+          git push --mirror
