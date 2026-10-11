@@ -1,7 +1,10 @@
 <?php
 
 use App\Http\Controllers\Admin\DashboardController;
+use App\Http\Controllers\Admin\PurchaseOrderController;
+use App\Http\Controllers\Admin\ReportController;
 use App\Http\Controllers\Admin\StockController;
+use App\Http\Controllers\Admin\SupplierController;
 use App\Http\Controllers\Admin\WarehouseController;
 use App\Http\Controllers\Internal\PreorderController;
 use App\Http\Controllers\Internal\ReservationController;
@@ -63,4 +66,25 @@ Route::middleware(['auth.jwt', 'authz'])->prefix('admin')->group(function () {
     Route::get('reservations', [ReturnController::class, 'reservations'])->middleware('permission:inventory.view');
     Route::post('reservations/{reservation}/returns', [ReturnController::class, 'store'])->middleware('permission:inventory.receive');
     Route::get('returns', [ReturnController::class, 'index'])->middleware('permission:inventory.view');
+
+    // reports (JSON, or ?format=csv)
+    Route::get('reports/low-stock', [ReportController::class, 'lowStock'])->middleware('permission:inventory.view');
+    Route::get('reports/out-of-stock', [ReportController::class, 'outOfStock'])->middleware('permission:inventory.view');
+    Route::get('reports/preorder-demand', [ReportController::class, 'preorderDemand'])->middleware('permission:inventory.view');
+    Route::get('reports/purchase-suggestions', [ReportController::class, 'purchaseSuggestions'])->middleware('permission:purchasing.view');
+
+    // suppliers (plain contact data; deactivate with PUT is_active=false)
+    Route::get('suppliers', [SupplierController::class, 'index'])->middleware('permission:purchasing.view');
+    Route::get('suppliers/{supplier}', [SupplierController::class, 'show'])->middleware('permission:purchasing.view');
+    Route::post('suppliers', [SupplierController::class, 'store'])->middleware('permission:purchasing.manage');
+    Route::put('suppliers/{supplier}', [SupplierController::class, 'update'])->middleware('permission:purchasing.manage');
+
+    // purchase orders
+    Route::get('purchase-orders', [PurchaseOrderController::class, 'index'])->middleware('permission:purchasing.view');
+    Route::get('purchase-orders/{purchaseOrder}', [PurchaseOrderController::class, 'show'])->middleware('permission:purchasing.view');
+    Route::post('purchase-orders', [PurchaseOrderController::class, 'store'])->middleware('permission:purchasing.manage');
+    Route::post('purchase-orders/from-suggestions', [PurchaseOrderController::class, 'fromSuggestions'])->middleware('permission:purchasing.manage');
+    Route::put('purchase-orders/{purchaseOrder}', [PurchaseOrderController::class, 'update'])->middleware('permission:purchasing.manage');
+    Route::post('purchase-orders/{purchaseOrder}/status', [PurchaseOrderController::class, 'changeStatus'])->middleware('permission:purchasing.manage');
+    Route::post('purchase-orders/{purchaseOrder}/receive', [PurchaseOrderController::class, 'receive'])->middleware('permission:inventory.receive');
 });

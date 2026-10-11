@@ -50,6 +50,7 @@ class AvailabilityService
             $pendingQty = (int) $pending->get($id, 0);
 
             $canPreorder = $item !== null
+                && $item->discontinued_at === null
                 && $item->allow_preorder
                 && ($item->preorder_limit === null || $pendingQty < $item->preorder_limit);
 

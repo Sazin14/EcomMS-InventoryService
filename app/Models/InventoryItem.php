@@ -10,11 +10,14 @@ class InventoryItem extends Model
     protected $fillable = [
         'variant_id', 'sku', 'product_name', 'variant_label',
         'allow_preorder', 'preorder_limit', 'expected_restock_at',
+        'catalog_event_at', 'discontinued_at',
     ];
 
     protected $casts = [
         'allow_preorder' => 'boolean',
         'expected_restock_at' => 'date:Y-m-d',
+        'catalog_event_at' => 'datetime',
+        'discontinued_at' => 'datetime',
     ];
 
     public function levels(): HasMany

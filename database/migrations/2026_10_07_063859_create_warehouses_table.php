@@ -2,61 +2,27 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
         Schema::create('warehouses', function (Blueprint $table) {
             $table->id();
-
-
-            $table->unsignedBigInteger('variant_id');
-            $table->string('sku', 100);
-
-
-            $table->foreignId('warehouse_id')
-                ->constrained('warehouses')
-                ->cascadeOnUpdate()
-                ->restrictOnDelete();
-
-            $table->unsignedBigInteger('on_hand')->default(0);
-            $table->unsignedBigInteger('reserved')->default(0);
-            $table->unsignedBigInteger('reorder_level')->default(0);
-
+            $table->string('code', 20)->unique();
+            $table->string('name');
+            $table->text('address')->nullable();
+            $table->boolean('is_active')->default(true);
+            $table->boolean('is_default')->default(false);
             $table->timestamps();
-
-            /*
-             * One stock row per variant per warehouse.
-             */
-            $table->unique(
-                ['variant_id', 'warehouse_id'],
-                'stock_levels_variant_warehouse_unique'
-            );
-
-            $table->index('variant_id');
-            $table->index('sku');
-            $table->index('warehouse_id');
-            $table->index('reorder_level');
         });
 
-        /*
-         * PostgreSQL-level integrity constraints.
-         */
-        DB::statement('
-            ALTER TABLE stock_levels
-            ADD CONSTRAINT stock_levels_reserved_lte_on_hand
-            CHECK (reserved <= on_hand)
-        ');
+        // At most one default warehouse (PostgreSQL partial unique index).
+        DB::statement('CREATE UNIQUE INDEX warehouses_single_default ON warehouses (is_default) WHERE is_default');
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
         Schema::dropIfExists('warehouses');

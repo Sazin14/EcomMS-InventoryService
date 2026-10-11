@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\InventoryItem;
 use App\Models\Preorder;
 use App\Models\Reservation;
+use App\Support\Outbox;
 use App\Services\Concerns\FailsValidation;
 use Illuminate\Support\Facades\DB;
 
@@ -111,6 +112,14 @@ class PreorderService
                 'preorder_allocated', $variantId, $sku, $preorder->quantity,
                 "Stock is now held for pre-order {$preorder->reference} ({$preorder->quantity} x {$sku})."
             );
+
+            Outbox::record('inventory.preorder.allocated', [
+                'reference' => $preorder->reference,
+                'variant_id' => $variantId,
+                'sku' => $sku,
+                'quantity' => $preorder->quantity,
+                'reservation_id' => $reservation->id,
+            ]);
 
             $count++;
         }

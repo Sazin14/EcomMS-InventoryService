@@ -7,6 +7,7 @@ use App\Models\StockLevel;
 use App\Models\StockMovement;
 use App\Models\Warehouse;
 use App\Services\Concerns\FailsValidation;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 
@@ -45,10 +46,53 @@ class StockService
         return count($variants);
     }
 
+    /**
+     * catalog.variant.upserted: ProductService says what a variant looks like now.
+     * An event older than the newest one already applied is ignored (it arrived late).
+     */
+    public function applyCatalogUpsert(array $d, CarbonInterface $at): void
+    {
+        $item = InventoryItem::where('variant_id', $d['variant_id'])->lockForUpdate()->first();
+
+        if ($item?->catalog_event_at && $item->catalog_event_at->greaterThan($at)) {
+            return;
+        }
+
+        InventoryItem::updateOrCreate(
+            ['variant_id' => $d['variant_id']],
+            [
+                'sku' => $d['sku'],
+                'product_name' => $d['product_name'] ?? null,
+                'variant_label' => $d['variant_label'] ?? null,
+                'allow_preorder' => (bool) ($d['allow_preorder'] ?? false),
+                'catalog_event_at' => $at,
+                'discontinued_at' => null,   // a variant that comes back is active again
+            ]
+        );
+
+        StockLevel::where('variant_id', $d['variant_id'])->update(['sku' => $d['sku']]);
+    }
+
+    /** catalog.variant.deleted: the variant is gone from the catalog. Its stock and history stay. */
+    public function applyCatalogDelete(int $variantId, CarbonInterface $at): void
+    {
+        $item = InventoryItem::where('variant_id', $variantId)->lockForUpdate()->first();
+
+        if (! $item || ($item->catalog_event_at && $item->catalog_event_at->greaterThan($at))) {
+            return;
+        }
+
+        $item->update([
+            'allow_preorder' => false,
+            'discontinued_at' => now(),
+            'catalog_event_at' => $at,
+        ]);
+    }
+
     /** Goods arrived (supplier receiving) or came back from a customer ($type = 'return'). */
     public function receive(array $d, array $actor, string $type = StockMovement::TYPE_RECEIPT): StockLevel
     {
-        return DB::transaction(function () use ($d, $actor) {
+        return DB::transaction(function () use ($d, $actor, $type) {
             $level = $this->lockLevel((int) $d['variant_id'], (int) $d['warehouse_id']);
             $qty = (int) $d['quantity'];
 

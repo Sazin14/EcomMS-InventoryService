@@ -26,6 +26,11 @@ class InventoryDemoSeeder extends Seeder
         $main = Warehouse::firstOrCreate(['code' => 'MAIN'], ['name' => 'Main Warehouse', 'address' => 'Dhaka']);
         $hub = Warehouse::firstOrCreate(['code' => 'CTG'], ['name' => 'Chattogram Hub', 'address' => 'Chattogram']);
 
+        \App\Models\Supplier::firstOrCreate(
+            ['name' => 'Demo Supplier Ltd'],
+            ['contact_name' => 'Mr. Rahman', 'phone' => '01700000000', 'email' => 'sales@demo-supplier.test', 'address' => 'Dhaka', 'notes' => 'Demo data']
+        );
+
         // make sure exactly one default exists
         if (! Warehouse::where('is_default', true)->exists()) {
             $warehouses->update($main, ['is_default' => true]);

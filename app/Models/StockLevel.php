@@ -24,6 +24,8 @@ class StockLevel extends Model
         'reorder_level' => 'integer',
     ];
 
+    protected $appends = ['available'];
+
     public function warehouse(): BelongsTo
     {
         return $this->belongsTo(Warehouse::class);
@@ -34,13 +36,24 @@ class StockLevel extends Model
         return $this->on_hand - $this->reserved;
     }
 
-    public function isLowStock(): bool
-    {
-        return $this->reorder_level > 0 && $this->available > 0 && $this->available <= $this->reorder_level;
-    }
+
 
     public function isOutOfStock(): bool
     {
         return $this->available <= 0;
     }
+
+    public function item(): BelongsTo
+    {
+        return $this->belongsTo(InventoryItem::class, 'variant_id', 'variant_id');
+    }
+
+    public function isLowStock(): bool
+    {
+        return $this->reorder_level > 0
+            && $this->available > 0
+            && $this->available <= $this->reorder_level;
+    }
+
+
 }
