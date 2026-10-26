@@ -2,8 +2,8 @@
 FROM node:22-alpine AS frontend-build
 WORKDIR /app
 
-COPY package.json ./
-RUN npm install --package-lock=false
+COPY package.json package-lock.json ./
+RUN npm ci
 
 COPY vite.config.js ./
 COPY resources ./resources
