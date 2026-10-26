@@ -6,6 +6,7 @@ workflow:
 
 stages:
   - test
+  - publish
 
 variables:
   IMAGE_SHA: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
@@ -59,3 +60,18 @@ build_test:
       exit 1
   after_script:
     - docker rm -f "$SMOKE_CONTAINER" >/dev/null 2>&1 || true
+
+publish_image:
+  stage: publish
+  tags:
+    - dell-local
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "devops" || $CI_COMMIT_BRANCH == "master")'
+  needs:
+    - job: build_test
+  script:
+    - echo "Logging in to GitLab Container Registry"
+    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+    - docker build -t "$IMAGE_SHA" .
+    - docker push "$IMAGE_SHA"
+    - echo "Published $IMAGE_SHA"
