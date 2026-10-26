@@ -17,6 +17,7 @@ class ReservationController extends Controller
         $data = $request->validate([
             'reference' => ['required', 'string', 'max:100'],
             'idempotency_key' => ['required', 'string', 'max:150'],
+            'customer_id' => ['nullable', 'integer', 'min:1'],               // for the flash-sale per-customer limit
             'ttl_minutes' => ['nullable', 'integer', 'min:1', 'max:4320'],   // COD: e.g. 1440 (24h) while staff confirm by phone
             'items' => ['required', 'array', 'min:1', 'max:50'],
             'items.*.variant_id' => ['required', 'integer'],
@@ -24,7 +25,11 @@ class ReservationController extends Controller
         ]);
 
         $reservation = $this->reservations->reserve(
-            $data['reference'], $data['items'], $data['idempotency_key'], $data['ttl_minutes'] ?? null
+            $data['reference'],
+            $data['items'],
+            $data['idempotency_key'],
+            $data['ttl_minutes'] ?? null,
+            $data['customer_id'] ?? null
         );
 
         return response()->json($reservation, 201);

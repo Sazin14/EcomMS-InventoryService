@@ -7,6 +7,7 @@ use App\Models\InventoryItem;
 use App\Models\StockLevel;
 use App\Models\StockMovement;
 use App\Services\AvailabilityService;
+use App\Services\FlashSaleGate;
 use App\Services\StockService;
 use Illuminate\Http\Request;
 
@@ -98,10 +99,20 @@ class StockController extends Controller
         $data = $request->validate([
             'preorder_limit' => ['nullable', 'integer', 'min:0'],
             'expected_restock_at' => ['nullable', 'date'],
+            'flash_sale' => ['sometimes', 'boolean'],                       // switch the Redis flash-sale gate on / off
+            'flash_limit_per_customer' => ['nullable', 'integer', 'min:1'],   // max units one customer may hold; null = no limit
         ]);
 
         $item = InventoryItem::where('variant_id', $variant)->firstOrFail();
         $item->update($data);
+
+        if (array_key_exists('flash_sale', $data)) {
+            $gate = app(FlashSaleGate::class);
+
+            $data['flash_sale']
+                ? $gate->prime($variant, app(AvailabilityService::class)->availableFor($variant))   // counter = what is available now
+                : $gate->forget($variant);
+        }
 
         return $item->fresh();
     }
