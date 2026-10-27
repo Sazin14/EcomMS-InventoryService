@@ -1,3 +1,4 @@
+
 workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"'
@@ -6,6 +7,7 @@ workflow:
 
 stages:
   - test
+  - promote
 
 variables:
   IMAGE_SHA: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
@@ -16,8 +18,9 @@ build_test:
   tags:
     - dell-local
   script:
+    - set -eu
     - docker info
-    - echo "Building Inventory Service for branch or merge request"
+    - echo "Building Inventory Service"
     - docker build -t "$IMAGE_SHA" .
     - echo "Checking Laravel CLI"
     - docker run --rm "$IMAGE_SHA" php artisan --version
@@ -63,7 +66,9 @@ build_test:
       if [ "${CI_PIPELINE_SOURCE:-}" = "push" ] &&
          [ "${CI_COMMIT_BRANCH:-}" = "master" ]; then
         echo "Publishing tested production image: $IMAGE_SHA"
-        printf '%s' "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin
+        printf '%s' "$CI_REGISTRY_PASSWORD" |
+          docker login "$CI_REGISTRY" \
+            --username "$CI_REGISTRY_USER" --password-stdin
         docker push "$IMAGE_SHA"
         docker logout "$CI_REGISTRY" >/dev/null 2>&1 || true
         echo "Published $IMAGE_SHA"
@@ -72,3 +77,54 @@ build_test:
       fi
   after_script:
     - docker rm -f "$SMOKE_CONTAINER" >/dev/null 2>&1 || true
+
+promote_gitops:
+  stage: promote
+  tags:
+    - dell-local
+  needs:
+    - job: build_test
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "master"'
+  script:
+    - |
+      set -eu
+      set +x
+
+      : "${GITOPS_GITHUB_TOKEN:?Missing protected GITOPS_GITHUB_TOKEN variable}"
+
+      AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITOPS_GITHUB_TOKEN" | base64 -w0)"
+      GITOPS_DIR="$(mktemp -d)"
+      trap 'rm -rf "$GITOPS_DIR"' EXIT
+
+      git -c http.extraheader="$AUTH_HEADER" clone \
+        --branch devops --single-branch \
+        https://github.com/Rasiulknots/ecomms-gitops.git \
+        "$GITOPS_DIR"
+
+      cd "$GITOPS_DIR"
+      FILE="apps/inventory/service/deployment.yaml"
+
+      test -f "$FILE"
+      grep -F "image: registry.gitlab.com/ecomms1/ecomms-inventoryservice:" "$FILE"
+
+      sed -i -E \
+        "s#(image: registry.gitlab.com/ecomms1/ecomms-inventoryservice:)[^[:space:]]+#\1${CI_COMMIT_SHORT_SHA}#" \
+        "$FILE"
+
+      grep -F "image: registry.gitlab.com/ecomms1/ecomms-inventoryservice:${CI_COMMIT_SHORT_SHA}" "$FILE"
+
+      if git diff --quiet -- "$FILE"; then
+        echo "GitOps already references this image; no update needed."
+        exit 0
+      fi
+
+      git config user.name "Inventory CI"
+      git config user.email "inventory-ci@users.noreply.github.com"
+      git add "$FILE"
+      git commit -m "Deploy Inventory image ${CI_COMMIT_SHORT_SHA}"
+
+      git -c http.extraheader="$AUTH_HEADER" push origin HEAD:devops
+
+      echo "GitOps updated to image ${CI_COMMIT_SHORT_SHA}"
+
