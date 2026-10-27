@@ -6,7 +6,6 @@ workflow:
 
 stages:
   - test
-  - publish
 
 variables:
   IMAGE_SHA: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
@@ -47,7 +46,7 @@ build_test:
           --max-time 2 "http://127.0.0.1:${HOST_PORT}/up" \
           --output /dev/null; then
           echo "HTTP smoke test passed."
-          exit 0
+          break
         fi
 
         echo "Waiting for HTTP readiness ($attempt/30)..."
@@ -55,23 +54,21 @@ build_test:
         sleep 1
       done
 
-      echo "HTTP smoke test failed."
-      docker logs "$SMOKE_CONTAINER" 2>&1 || true
-      exit 1
+      if [ "$attempt" -gt 30 ]; then
+        echo "HTTP smoke test failed."
+        docker logs "$SMOKE_CONTAINER" 2>&1 || true
+        exit 1
+      fi
+
+      if [ "${CI_PIPELINE_SOURCE:-}" = "push" ] &&
+         [ "${CI_COMMIT_BRANCH:-}" = "master" ]; then
+        echo "Publishing tested production image: $IMAGE_SHA"
+        printf '%s' "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin
+        docker push "$IMAGE_SHA"
+        docker logout "$CI_REGISTRY" >/dev/null 2>&1 || true
+        echo "Published $IMAGE_SHA"
+      else
+        echo "Not a push to master; skipping image publication."
+      fi
   after_script:
     - docker rm -f "$SMOKE_CONTAINER" >/dev/null 2>&1 || true
-
-publish_image:
-  stage: publish
-  tags:
-    - dell-local
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "devops" || $CI_COMMIT_BRANCH == "master")'
-  needs:
-    - job: build_test
-  script:
-    - echo "Logging in to GitLab Container Registry"
-    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
-    - docker build -t "$IMAGE_SHA" .
-    - docker push "$IMAGE_SHA"
-    - echo "Published $IMAGE_SHA"
