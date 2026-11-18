@@ -16,10 +16,6 @@ return new class extends Migration
                 ->cascadeOnUpdate()
                 ->cascadeOnDelete();
 
-            /*
-             * Product Service identifiers.
-             * No cross-service foreign keys.
-             */
             $table->unsignedBigInteger('variant_id');
             $table->string('sku', 100);
 
@@ -36,10 +32,6 @@ return new class extends Migration
             $table->index('sku');
             $table->index('warehouse_id');
 
-            /*
-             * A reservation should not contain the same
-             * variant/warehouse combination twice.
-             */
             $table->unique(
                 ['reservation_id', 'variant_id', 'warehouse_id'],
                 'reservation_items_unique_variant_warehouse'

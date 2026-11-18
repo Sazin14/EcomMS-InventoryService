@@ -19,7 +19,6 @@ return new class extends Migration
             $table->timestamps();
         });
 
-        // At most one default warehouse (PostgreSQL partial unique index).
         DB::statement('CREATE UNIQUE INDEX warehouses_single_default ON warehouses (is_default) WHERE is_default');
     }
 

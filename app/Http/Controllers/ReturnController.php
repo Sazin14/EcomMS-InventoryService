@@ -7,14 +7,10 @@ use App\Models\StockReturn;
 use App\Services\ReturnService;
 use Illuminate\Http\Request;
 
-/**
- * Used by warehouse staff (dashboard, after inspecting the parcel) and by the Order service.
- */
 class ReturnController extends Controller
 {
     public function __construct(private ReturnService $returns) {}
 
-    /** Find the shipped order a parcel belongs to: ?reference=ORD-1&status=fulfilled */
     public function reservations(Request $request)
     {
         return Reservation::with('items')
@@ -47,7 +43,6 @@ class ReturnController extends Controller
         return response()->json($return, 201);
     }
 
-    /** Return report. ?reference= */
     public function index(Request $request)
     {
         return StockReturn::with('items')

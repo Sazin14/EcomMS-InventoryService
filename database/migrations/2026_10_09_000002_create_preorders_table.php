@@ -10,11 +10,11 @@ return new class extends Migration
     {
         Schema::create('preorders', function (Blueprint $t) {
             $t->id();
-            $t->string('reference', 64);                       // order number from the Order service
+            $t->string('reference', 64);
             $t->unsignedBigInteger('variant_id');
             $t->unsignedInteger('quantity');
-            $t->string('status', 20)->default('pending');      // pending | allocated | cancelled
-            $t->foreignId('reservation_id')->nullable()->constrained()->nullOnDelete();   // set when stock was held for it
+            $t->string('status', 20)->default('pending');
+            $t->foreignId('reservation_id')->nullable()->constrained()->nullOnDelete();
             $t->timestamp('allocated_at')->nullable();
             $t->timestamps();
 

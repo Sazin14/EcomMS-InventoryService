@@ -2,10 +2,10 @@
 
 namespace App\Services;
 
+use App\Support\RabbitMq\EventHandler;
 use Carbon\CarbonImmutable;
 
-/** Turns events from ProductService into changes in Inventory. Unknown event types are ignored on purpose. */
-class CatalogEventHandler
+class CatalogEventHandler implements EventHandler
 {
     public function __construct(private StockService $stock) {}
 
@@ -16,8 +16,8 @@ class CatalogEventHandler
 
         match ($envelope['type']) {
             'catalog.variant.upserted' => $this->stock->applyCatalogUpsert($data, $at),
-            'catalog.variant.deleted' => $this->stock->applyCatalogDelete((int) $data['variant_id'], $at),
-            default => null,   // a newer producer may send types this version does not know yet
+            'catalog.variant.deleted' => $this->stock->applyCatalogDelete((int) $data['variant_id'], $at, $data['sku'] ?? null),
+            default => null,
         };
     }
 }

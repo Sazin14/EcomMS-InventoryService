@@ -8,15 +8,14 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // One row per product variant. variant_id comes from ProductService (no cross-database foreign key).
         Schema::create('inventory_items', function (Blueprint $t) {
             $t->id();
             $t->unsignedBigInteger('variant_id')->unique();
             $t->string('sku', 100)->index();
-            $t->string('product_name')->nullable();     // snapshot for the dashboard, sent by ProductService
-            $t->string('variant_label')->nullable();    // e.g. "8GB / 128GB / Space Grey"
+            $t->string('product_name')->nullable();
+            $t->string('variant_label')->nullable();
             $t->boolean('allow_preorder')->default(false);
-            $t->unsignedInteger('preorder_limit')->nullable();  // max pending pre-order units (null = unlimited)
+            $t->unsignedInteger('preorder_limit')->nullable();
             $t->date('expected_restock_at')->nullable();
             $t->timestamps();
         });

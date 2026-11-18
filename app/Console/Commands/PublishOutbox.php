@@ -18,6 +18,17 @@ class PublishOutbox extends Command
     public function handle(OutboxPublisher $publisher): int
     {
         $started = time();
+        $idleSince = null;
+        $stop = false;
+
+        // Graceful stop (docker stop / supervisor): finish the current batch, then exit.
+        if (function_exists('pcntl_signal')) {
+            foreach ([SIGTERM, SIGINT] as $signal) {
+                pcntl_signal($signal, function () use (&$stop) {
+                    $stop = true;
+                });
+            }
+        }
 
         do {
             try {
@@ -39,9 +50,22 @@ class PublishOutbox extends Command
             }
 
             if ($count === 0) {
+                $idleSince ??= time();
+
+                // An idle connection sends no heartbeats while we sleep and RabbitMQ drops it: close it ourselves.
+                if (time() - $idleSince >= 30) {
+                    $publisher->close();
+                }
+
                 sleep(max(1, (int) $this->option('sleep')));
+            } else {
+                $idleSince = null;
             }
-        } while (time() - $started < (int) $this->option('max-runtime'));
+
+            if (function_exists('pcntl_signal_dispatch')) {
+                pcntl_signal_dispatch();
+            }
+        } while (! $stop && time() - $started < (int) $this->option('max-runtime'));
 
         $publisher->close();
 

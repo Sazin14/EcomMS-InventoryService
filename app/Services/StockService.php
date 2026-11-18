@@ -10,11 +10,9 @@ use App\Services\Concerns\FailsValidation;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
-/**
- * Changes on_hand. Every change writes a StockMovement in the same transaction.
- * $actor = ['type' => 'staff', 'id' => 5]   (or 'system' / 'order_service' with a null id)
- */
 class StockService
 {
     use FailsValidation;
@@ -24,32 +22,35 @@ class StockService
         private AlertService $alerts,
     ) {}
 
-    /**
-     * ProductService pushes its variants here. Safe to call again and again.
-     * allow_preorder is owned by the product form (ProductService); the limit and restock date
-     * stay with the inventory manager and are never touched by a sync.
-     */
-    public function syncVariants(array $variants): int
+    /** @return array{synced:int, skipped:int} */
+    public function syncVariants(array $variants, bool $force = false): array
     {
-        DB::transaction(function () use ($variants) {
+        $synced = 0;
+        $skipped = 0;
+
+        DB::transaction(function () use ($variants, $force, &$synced, &$skipped) {
             foreach ($variants as $v) {
+                $existing = InventoryItem::where('variant_id', $v['variant_id'])->lockForUpdate()->first();
+
+                if (! $force && $existing?->catalog_event_at) {
+                    $skipped++;
+
+                    continue;
+                }
+
                 InventoryItem::updateOrCreate(
                     ['variant_id' => $v['variant_id']],
-                    Arr::only($v, ['sku', 'product_name', 'variant_label', 'allow_preorder'])   // absent keys are left untouched
+                    Arr::only($v, ['sku', 'product_name', 'variant_label', 'allow_preorder'])
                 );
 
-                // keep the sku copies on stock rows in step with ProductService
                 StockLevel::where('variant_id', $v['variant_id'])->update(['sku' => $v['sku']]);
+                $synced++;
             }
         });
 
-        return count($variants);
+        return ['synced' => $synced, 'skipped' => $skipped];
     }
 
-    /**
-     * catalog.variant.upserted: ProductService says what a variant looks like now.
-     * An event older than the newest one already applied is ignored (it arrived late).
-     */
     public function applyCatalogUpsert(array $d, CarbonInterface $at): void
     {
         $item = InventoryItem::where('variant_id', $d['variant_id'])->lockForUpdate()->first();
@@ -57,6 +58,8 @@ class StockService
         if ($item?->catalog_event_at && $item->catalog_event_at->greaterThan($at)) {
             return;
         }
+
+        $isNew = $item === null;
 
         InventoryItem::updateOrCreate(
             ['variant_id' => $d['variant_id']],
@@ -66,19 +69,56 @@ class StockService
                 'variant_label' => $d['variant_label'] ?? null,
                 'allow_preorder' => (bool) ($d['allow_preorder'] ?? false),
                 'catalog_event_at' => $at,
-                'discontinued_at' => null,   // a variant that comes back is active again
+                'discontinued_at' => null,
             ]
         );
 
         StockLevel::where('variant_id', $d['variant_id'])->update(['sku' => $d['sku']]);
+
+        if ($isNew && (int) ($d['initial_stock'] ?? 0) > 0) {
+            $this->receiveInitialStock((int) $d['variant_id'], (int) $d['initial_stock']);
+        }
     }
 
-    /** catalog.variant.deleted: the variant is gone from the catalog. Its stock and history stay. */
-    public function applyCatalogDelete(int $variantId, CarbonInterface $at): void
+    private function receiveInitialStock(int $variantId, int $quantity): void
+    {
+        $warehouse = Warehouse::where('is_default', true)->where('is_active', true)->first();
+
+        if (! $warehouse) {
+            Log::warning('Initial stock ignored: there is no active default warehouse.', ['variant_id' => $variantId, 'quantity' => $quantity]);
+
+            return;
+        }
+
+        $this->receive([
+            'variant_id' => $variantId,
+            'warehouse_id' => $warehouse->id,
+            'quantity' => $quantity,
+            'reference_type' => 'product_creation',
+            'reference_id' => (string) $variantId,
+            'reason' => 'Opening stock entered when the product was created.',
+        ], ['type' => 'system', 'id' => null]);
+    }
+
+    public function applyCatalogDelete(int $variantId, CarbonInterface $at, ?string $sku = null): void
     {
         $item = InventoryItem::where('variant_id', $variantId)->lockForUpdate()->first();
 
-        if (! $item || ($item->catalog_event_at && $item->catalog_event_at->greaterThan($at))) {
+        if (! $item) {
+            if ($sku !== null && $sku !== '') {
+                InventoryItem::create([
+                    'variant_id' => $variantId,
+                    'sku' => $sku,
+                    'allow_preorder' => false,
+                    'discontinued_at' => now(),
+                    'catalog_event_at' => $at,
+                ]);
+            }
+
+            return;
+        }
+
+        if ($item->catalog_event_at && $item->catalog_event_at->greaterThan($at)) {
             return;
         }
 
@@ -89,7 +129,6 @@ class StockService
         ]);
     }
 
-    /** Goods arrived (supplier receiving) or came back from a customer ($type = 'return'). */
     public function receive(array $d, array $actor, string $type = StockMovement::TYPE_RECEIPT): StockLevel
     {
         return DB::transaction(function () use ($d, $actor, $type) {
@@ -101,14 +140,12 @@ class StockService
 
             $this->record($level, $type, $qty, $d['reference_type'] ?? 'purchase_order', $d['reference_id'] ?? null, $d['reason'] ?? null, $actor);
 
-            // New stock goes first to customers waiting on a pre-order.
             $this->preorders->allocate($level->variant_id);
 
             return $level->fresh();
         });
     }
 
-    /** Correction: damaged, lost, counting error. Signed, never zero, reason required. */
     public function adjust(array $d, array $actor): StockLevel
     {
         $change = (int) $d['quantity_change'];
@@ -139,6 +176,52 @@ class StockService
         });
     }
 
+    public function transfer(array $d, array $actor): array
+    {
+        $variantId = (int) $d['variant_id'];
+        $from = (int) $d['from_warehouse_id'];
+        $to = (int) $d['to_warehouse_id'];
+        $qty = (int) $d['quantity'];
+
+        if ($from === $to) {
+            $this->fail('to_warehouse_id', 'The source and destination warehouse must be different.');
+        }
+
+        return DB::transaction(function () use ($variantId, $from, $to, $qty, $d, $actor) {
+            $ids = [$from, $to];
+            sort($ids);
+
+            $levels = [];
+
+            foreach ($ids as $warehouseId) {
+                $levels[$warehouseId] = $this->lockLevel($variantId, $warehouseId);
+            }
+
+            $source = $levels[$from];
+            $target = $levels[$to];
+            $free = $source->on_hand - $source->reserved;
+
+            if ($free < $qty) {
+                $this->fail('quantity', "Only {$free} unit(s) are free in the source warehouse (reserved stock cannot be moved).");
+            }
+
+            $source->on_hand -= $qty;
+            $source->save();
+            $target->on_hand += $qty;
+            $target->save();
+
+            $transferId = (string) Str::uuid();
+            $reason = $d['reason'] ?? null;
+
+            $this->record($source, StockMovement::TYPE_TRANSFER_OUT, -$qty, 'transfer', $transferId, $reason, $actor);
+            $this->record($target, StockMovement::TYPE_TRANSFER_IN, $qty, 'transfer', $transferId, $reason, $actor);
+
+            $this->alerts->checkStock($variantId);
+
+            return ['transfer_id' => $transferId, 'from' => $source->fresh(), 'to' => $target->fresh()];
+        });
+    }
+
     public function setReorderLevel(int $variantId, int $warehouseId, int $reorderLevel): StockLevel
     {
         return DB::transaction(function () use ($variantId, $warehouseId, $reorderLevel) {
@@ -150,7 +233,6 @@ class StockService
         });
     }
 
-    /** Finds (or creates) the stock row for variant + warehouse and locks it for this transaction. */
     private function lockLevel(int $variantId, int $warehouseId): StockLevel
     {
         $item = InventoryItem::where('variant_id', $variantId)->first()

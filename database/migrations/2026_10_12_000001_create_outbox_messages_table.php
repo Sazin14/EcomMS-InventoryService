@@ -12,12 +12,12 @@ return new class extends Migration
             $t->id();
             $t->uuid('message_id')->unique();
             $t->string('routing_key', 150);
-            $t->text('payload');                           // the full JSON envelope, exactly as it will be sent
+            $t->text('payload');
             $t->timestamp('occurred_at');
-            $t->timestamp('published_at')->nullable();     // null = still waiting to be sent
+            $t->timestamp('published_at')->nullable();
             $t->unsignedInteger('attempts')->default(0);
             $t->text('last_error')->nullable();
-            $t->timestamp('available_at');                 // do not try before this (retry back-off)
+            $t->timestamp('available_at');
             $t->timestamps();
 
             $t->index(['published_at', 'available_at']);

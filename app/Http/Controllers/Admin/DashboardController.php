@@ -8,10 +8,8 @@ use App\Models\InventoryItem;
 use App\Models\Preorder;
 use Illuminate\Http\Request;
 
-/** Inventory dashboard: notifications and the pre-order report. */
 class DashboardController extends Controller
 {
-    /** ?unread=1  ?type=low_stock|out_of_stock|preorder_created|preorder_allocated */
     public function alerts(Request $request)
     {
         return InventoryAlert::query()
@@ -33,7 +31,6 @@ class DashboardController extends Controller
         return ['marked' => InventoryAlert::whereNull('read_at')->update(['read_at' => now()])];
     }
 
-    /** Individual pre-orders. ?status=pending|allocated|cancelled  ?variant_id= */
     public function preorders(Request $request)
     {
         return Preorder::with('item:variant_id,sku,product_name,variant_label')
@@ -43,7 +40,6 @@ class DashboardController extends Controller
             ->paginate(min((int) $request->query('per_page', 30), 100));
     }
 
-    /** The pre-order report: demand per variant, so the manager knows what to order from suppliers. */
     public function preorderSummary()
     {
         $pending = fn ($q) => $q->where('status', 'pending');

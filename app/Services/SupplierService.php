@@ -17,7 +17,6 @@ class SupplierService
 
     public function update(Supplier $supplier, array $data): Supplier
     {
-        // Deactivating a supplier with goods still on the way would hide an open order.
         if (array_key_exists('is_active', $data) && ! $data['is_active']
             && PurchaseOrder::where('supplier_id', $supplier->id)->whereIn('status', PurchaseOrder::OPEN)->exists()) {
             $this->fail('is_active', 'This supplier still has open purchase orders.');

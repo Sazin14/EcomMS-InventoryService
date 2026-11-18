@@ -11,9 +11,9 @@ return new class extends Migration
     {
         Schema::create('purchase_orders', function (Blueprint $t) {
             $t->id();
-            $t->string('number', 50)->unique();                       // PO-2026-000001
+            $t->string('number', 50)->unique();
             $t->foreignId('supplier_id')->constrained('suppliers')->restrictOnDelete();
-            $t->foreignId('warehouse_id')->constrained('warehouses')->restrictOnDelete();   // where the goods arrive
+            $t->foreignId('warehouse_id')->constrained('warehouses')->restrictOnDelete();
             $t->string('status', 30)->default('draft');
             $t->date('expected_at')->nullable();
             $t->text('notes')->nullable();
@@ -21,7 +21,7 @@ return new class extends Migration
             $t->timestamp('received_at')->nullable();
             $t->timestamp('closed_at')->nullable();
             $t->timestamp('cancelled_at')->nullable();
-            $t->unsignedBigInteger('created_by_id')->nullable();     // staff id
+            $t->unsignedBigInteger('created_by_id')->nullable();
             $t->timestamps();
 
             $t->index('status');
@@ -32,7 +32,7 @@ return new class extends Migration
             $t->id();
             $t->foreignId('purchase_order_id')->constrained('purchase_orders')->cascadeOnDelete();
             $t->unsignedBigInteger('variant_id');
-            $t->string('sku', 100);                                   // snapshot
+            $t->string('sku', 100);
             $t->unsignedInteger('quantity_ordered');
             $t->unsignedInteger('quantity_received')->default(0);
             $t->decimal('unit_cost', 12, 2)->nullable();
@@ -43,7 +43,6 @@ return new class extends Migration
             $t->foreign('variant_id')->references('variant_id')->on('inventory_items')->restrictOnDelete();
         });
 
-        // One row per delivery that arrived (partial deliveries are normal). idempotency_key = no double counting.
         Schema::create('purchase_receipts', function (Blueprint $t) {
             $t->id();
             $t->foreignId('purchase_order_id')->constrained('purchase_orders')->restrictOnDelete();
@@ -63,7 +62,6 @@ return new class extends Migration
             $t->unsignedInteger('quantity');
         });
 
-        // The database refuses impossible numbers and unknown statuses.
         DB::statement('ALTER TABLE purchase_order_items ADD CONSTRAINT purchase_order_items_quantities_valid
             CHECK (quantity_ordered > 0 AND quantity_received >= 0 AND quantity_received <= quantity_ordered)');
 

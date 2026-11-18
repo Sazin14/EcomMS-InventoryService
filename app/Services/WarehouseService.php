@@ -14,7 +14,6 @@ class WarehouseService
     public function create(array $data): Warehouse
     {
         return DB::transaction(function () use ($data) {
-            // the very first warehouse becomes the default
             if (! Warehouse::where('is_default', true)->exists()) {
                 $data['is_default'] = true;
             }

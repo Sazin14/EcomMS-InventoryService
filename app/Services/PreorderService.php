@@ -9,10 +9,6 @@ use App\Support\Outbox;
 use App\Services\Concerns\FailsValidation;
 use Illuminate\Support\Facades\DB;
 
-/**
- * Pre-order = a customer buys something that is not in stock yet.
- * When stock arrives, waiting pre-orders get it first (oldest first) and it is held for them.
- */
 class PreorderService
 {
     use FailsValidation;
@@ -28,11 +24,10 @@ class PreorderService
         $existing = Preorder::where('reference', $reference)->where('variant_id', $variantId)->first();
 
         if ($existing) {
-            return $existing;   // retry-safe
+            return $existing;
         }
 
         return DB::transaction(function () use ($reference, $variantId, $quantity) {
-            // Lock the item so two simultaneous pre-orders cannot both slip under the limit.
             $item = InventoryItem::where('variant_id', $variantId)->lockForUpdate()->first()
                 ?? $this->fail('variant_id', 'Unknown variant.');
 
@@ -64,11 +59,6 @@ class PreorderService
         });
     }
 
-    /**
-     * Gives available stock to pending pre-orders, oldest first.
-     * Stops at the first one that cannot be filled completely (first come, first served).
-     * Call inside a transaction, after stock was added or freed.
-     */
     public function allocate(int $variantId): int
     {
         $sku = InventoryItem::where('variant_id', $variantId)->value('sku');
@@ -81,13 +71,12 @@ class PreorderService
             ->get();
 
         foreach ($pending as $preorder) {
-            $warehouseId = $this->allocator->reserveLine($variantId, $preorder->quantity);
+            $split = $this->allocator->reserve($variantId, $preorder->quantity);
 
-            if ($warehouseId === null) {
+            if ($split === null) {
                 break;
             }
 
-            // Held for this order until it ships (confirmed = no expiry).
             $reservation = Reservation::create([
                 'reference' => $preorder->reference,
                 'idempotency_key' => "preorder:{$preorder->id}",
@@ -95,12 +84,14 @@ class PreorderService
                 'expires_at' => null,
             ]);
 
-            $reservation->items()->create([
-                'variant_id' => $variantId,
-                'sku' => $sku,
-                'warehouse_id' => $warehouseId,
-                'quantity' => $preorder->quantity,
-            ]);
+            foreach ($split as $warehouseId => $part) {
+                $reservation->items()->create([
+                    'variant_id' => $variantId,
+                    'sku' => $sku,
+                    'warehouse_id' => $warehouseId,
+                    'quantity' => $part,
+                ]);
+            }
 
             $preorder->update([
                 'status' => 'allocated',
@@ -127,17 +118,36 @@ class PreorderService
         return $count;
     }
 
+    public function cancelAllFor(string $reference): int
+    {
+        $variantIds = Preorder::where('reference', $reference)
+            ->whereIn('status', ['pending', 'allocated'])
+            ->pluck('variant_id');
+
+        foreach ($variantIds as $variantId) {
+            $this->cancel($reference, (int) $variantId);
+        }
+
+        return $variantIds->count();
+    }
+
     public function cancel(string $reference, int $variantId): Preorder
     {
         return DB::transaction(function () use ($reference, $variantId) {
             $preorder = Preorder::where('reference', $reference)->where('variant_id', $variantId)->lockForUpdate()->firstOrFail();
 
-            if ($preorder->status === 'cancelled') {
+            if (in_array($preorder->status, ['cancelled', 'fulfilled'], true)) {
+                return $preorder;
+            }
+
+            if ($preorder->status === 'allocated' && $preorder->reservation_id
+                && Reservation::whereKey($preorder->reservation_id)->value('status') === Reservation::FULFILLED) {
+                $preorder->update(['status' => 'fulfilled']);
+
                 return $preorder;
             }
 
             if ($preorder->status === 'allocated' && $preorder->reservation_id) {
-                // frees the held stock (fails with a clear message if it already shipped)
                 app(ReservationService::class)->release($preorder->reservation_id);
             }
 

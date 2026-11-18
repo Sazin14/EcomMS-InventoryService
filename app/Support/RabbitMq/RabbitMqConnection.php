@@ -37,11 +37,22 @@ class RabbitMqConnection
 
         $this->channel = $this->connection->channel();
 
-        // Declaring an existing exchange with the same settings does nothing, so this is safe every time.
+        // Declaring something that already exists with the same settings does nothing, so this is safe every time.
         $this->channel->exchange_declare($c['exchange'], 'topic', false, true, false);
         $this->channel->exchange_declare($c['retry_exchange'], 'direct', false, true, false);
 
+        // Queues + audit queue: an event can never be dropped because "nobody was listening yet".
+        RabbitMqTopology::declareAll($this->channel);
+
         return $this->channel;
+    }
+
+    /** A second channel on the same connection (e.g. publish confirmations while the first one consumes). */
+    public function extraChannel(): AMQPChannel
+    {
+        $this->channel();   // makes sure the connection is open
+
+        return $this->connection->channel();
     }
 
     public function close(): void

@@ -42,14 +42,13 @@ class CheckAuthorization
 
         $key = "authz:staff:{$userId}";
 
-        $cached = Redis::get($key);
+        $cached = Redis::connection('authz')->get($key);   // shared with AuthService, see config/database.php
 
         if ($cached === null) {
-
+            // no cache = the staff member was deleted, or Redis lost it: sign in again (login / refresh rebuild it)
             return response()->json([
-                'message' =>
-                    'Authorization information unavailable.',
-            ], 503);
+                'message' => 'Your session has expired. Please sign in again.',
+            ], 401);
         }
 
         $authorization = json_decode(

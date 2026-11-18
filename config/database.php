@@ -179,6 +179,23 @@ return [
             'backoff_cap' => env('REDIS_BACKOFF_CAP', 1000),
         ],
 
+        // Staff authorization cache (authz:staff:{id}). Written by AuthService, read by every other service.
+        // It has its OWN fixed prefix, so it is shared even though each service uses its own REDIS_PREFIX
+        // for queues and cache. Must be identical in every service.
+        'authz' => [
+            'url' => env('REDIS_URL'),
+            'host' => env('REDIS_HOST', '127.0.0.1'),
+            'username' => env('REDIS_USERNAME'),
+            'password' => env('REDIS_PASSWORD'),
+            'port' => env('REDIS_PORT', '6379'),
+            'database' => env('REDIS_AUTHZ_DB', '0'),
+            'options' => ['prefix' => env('REDIS_AUTHZ_PREFIX', 'ecom-authz:')],
+            'max_retries' => env('REDIS_MAX_RETRIES', 3),
+            'backoff_algorithm' => env('REDIS_BACKOFF_ALGORITHM', 'decorrelated_jitter'),
+            'backoff_base' => env('REDIS_BACKOFF_BASE', 100),
+            'backoff_cap' => env('REDIS_BACKOFF_CAP', 1000),
+        ],
+
     ],
 
 ];

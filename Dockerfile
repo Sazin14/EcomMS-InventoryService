@@ -63,6 +63,10 @@ RUN apk add --no-cache \
         opcache \
     && apk del .build-deps
 
+# redis: the admin API reads staff permissions from Redis (phpredis). pcntl: workers stop gracefully on SIGTERM.
+COPY --from=mlocati/php-extension-installer /usr/bin/install-php-extensions /usr/local/bin/
+RUN install-php-extensions redis pcntl
+
 WORKDIR /var/www/html
 
 COPY --from=composer-build /app /var/www/html

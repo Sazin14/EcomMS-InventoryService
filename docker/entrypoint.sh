@@ -13,6 +13,7 @@ mkdir -p \
 chown -R www-data:www-data storage bootstrap/cache
 
 if [ "${1:-api}" = "api" ]; then
+    export RUN_WORKERS="${RUN_WORKERS:-true}"   # false = API only (php-fpm + nginx), see docker/supervisord.conf
     exec /usr/bin/supervisord -c /etc/supervisord.conf
 fi
 

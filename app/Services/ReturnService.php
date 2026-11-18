@@ -11,11 +11,6 @@ use App\Services\Concerns\FailsValidation;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 
-/**
- * Goods coming back after shipping: customer refused at the door (COD), could not be reached,
- * wrong or defective item, or a return after delivery. Inventory only counts units;
- * the money side (COD collected / refund) belongs to the Order / Payment service.
- */
 class ReturnService
 {
     use FailsValidation;
@@ -26,13 +21,13 @@ class ReturnService
     ) {}
 
     /**
-     * @param  array  $items  [['variant_id' => 1, 'quantity' => 1, 'condition' => 'resellable|damaged', 'warehouse_id' => null], ...]
-     * @param  array  $actor  ['type' => 'staff', 'id' => 5]
+     * @param array $items
+     * @param array $actor
      */
     public function receive(int $reservationId, string $idempotencyKey, array $items, ?string $reason, array $actor): StockReturn
     {
         if ($existing = StockReturn::where('idempotency_key', $idempotencyKey)->first()) {
-            return $existing->load('items');   // repeated request: nothing is counted twice
+            return $existing->load('items');
         }
 
         try {
@@ -64,43 +59,67 @@ class ReturnService
 
                     $seen[$variantId] = true;
 
-                    $item = $reservation->items->firstWhere('variant_id', $variantId)
-                        ?? $this->fail("items.$i.variant_id", 'This variant is not part of the order.');
+                    $lines = $reservation->items->where('variant_id', $variantId)->sortBy('id')->values();
 
-                    // Atomic guard: total returned can never exceed what was shipped.
-                    $updated = ReservationItem::whereKey($item->id)
-                        ->whereRaw('returned_quantity + ? <= quantity', [$qty])
-                        ->increment('returned_quantity', $qty);
-
-                    if ($updated !== 1) {
-                        $left = $item->quantity - (int) ReservationItem::whereKey($item->id)->value('returned_quantity');
-                        $this->fail("items.$i.quantity", "Only {$left} unit(s) of this variant can still be returned.");
+                    if ($lines->isEmpty()) {
+                        $this->fail("items.$i.variant_id", 'This variant is not part of the order.');
                     }
 
-                    $warehouseId = (int) ($row['warehouse_id'] ?? $item->warehouse_id);
+                    $sku = $lines->first()->sku;
+                    $left = $qty;
 
-                    $return->items()->create([
-                        'variant_id' => $variantId,
-                        'sku' => $item->sku,
-                        'warehouse_id' => $warehouseId,
-                        'quantity' => $qty,
-                        'condition' => $row['condition'],
-                    ]);
+                    foreach ($lines as $item) {
+                        $room = (int) $item->quantity - (int) ReservationItem::whereKey($item->id)->lockForUpdate()->value('returned_quantity');
+                        $part = min($left, $room);
 
-                    if ($row['condition'] === StockReturnItem::RESELLABLE) {
-                        // Back on the shelf: +on_hand, a "return" movement, and waiting pre-orders get first pick.
-                        $this->stock->receive([
+                        if ($part <= 0) {
+                            continue;
+                        }
+
+                        $updated = ReservationItem::whereKey($item->id)
+                            ->whereRaw('returned_quantity + ? <= quantity', [$part])
+                            ->increment('returned_quantity', $part);
+
+                        if ($updated !== 1) {
+                            continue;
+                        }
+
+                        $warehouseId = (int) ($row['warehouse_id'] ?? $item->warehouse_id);
+
+                        $return->items()->create([
                             'variant_id' => $variantId,
+                            'sku' => $item->sku,
                             'warehouse_id' => $warehouseId,
-                            'quantity' => $qty,
-                            'reference_type' => 'order',
-                            'reference_id' => $reservation->reference,
-                            'reason' => $reason ?? 'Customer return',
-                        ], $actor, StockMovement::TYPE_RETURN);
-                    } else {
+                            'quantity' => $part,
+                            'condition' => $row['condition'],
+                        ]);
+
+                        if ($row['condition'] === StockReturnItem::RESELLABLE) {
+                            $this->stock->receive([
+                                'variant_id' => $variantId,
+                                'warehouse_id' => $warehouseId,
+                                'quantity' => $part,
+                                'reference_type' => 'order',
+                                'reference_id' => $reservation->reference,
+                                'reason' => $reason ?? 'Customer return',
+                            ], $actor, StockMovement::TYPE_RETURN);
+                        }
+
+                        $left -= $part;
+
+                        if ($left === 0) {
+                            break;
+                        }
+                    }
+
+                    if ($left > 0) {
+                        $this->fail("items.$i.quantity", 'Only '.($qty - $left).' unit(s) of this variant can still be returned.');
+                    }
+
+                    if ($row['condition'] !== StockReturnItem::RESELLABLE) {
                         $this->alerts->raise(
-                            'return_damaged', $variantId, $item->sku, $qty,
-                            "{$qty} x {$item->sku} came back damaged from {$reservation->reference}; not added to sellable stock."
+                            'return_damaged', $variantId, $sku, $qty,
+                            "{$qty} x {$sku} came back damaged from {$reservation->reference}; not added to sellable stock."
                         );
                     }
                 }

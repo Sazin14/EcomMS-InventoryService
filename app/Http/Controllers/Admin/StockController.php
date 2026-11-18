@@ -15,7 +15,6 @@ class StockController extends Controller
 {
     public function __construct(private StockService $stock) {}
 
-    /** Dashboard table. ?search=  ?filter=low|out  ?per_page= */
     public function index(Request $request)
     {
         $available = '(select coalesce(sum(on_hand - reserved), 0) from stock_levels where stock_levels.variant_id = inventory_items.variant_id)';
@@ -83,6 +82,19 @@ class StockController extends Controller
         return $this->stock->adjust($data, $this->actor($request));
     }
 
+    public function transfer(Request $request)
+    {
+        $data = $request->validate([
+            'variant_id' => ['required', 'integer'],
+            'from_warehouse_id' => ['required', 'integer'],
+            'to_warehouse_id' => ['required', 'integer', 'different:from_warehouse_id'],
+            'quantity' => ['required', 'integer', 'min:1', 'max:1000000'],
+            'reason' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        return response()->json($this->stock->transfer($data, $this->actor($request)), 201);
+    }
+
     public function reorderLevel(Request $request, int $variant, int $warehouse)
     {
         $data = $request->validate(['reorder_level' => ['required', 'integer', 'min:0', 'max:1000000']]);
@@ -90,17 +102,13 @@ class StockController extends Controller
         return $this->stock->setReorderLevel($variant, $warehouse, $data['reorder_level']);
     }
 
-    /**
-     * Pre-order limit and expected restock date. The on/off switch (allow_preorder) is set when the
-     * product is created or edited in ProductService, not here.
-     */
     public function policy(Request $request, int $variant)
     {
         $data = $request->validate([
             'preorder_limit' => ['nullable', 'integer', 'min:0'],
             'expected_restock_at' => ['nullable', 'date'],
-            'flash_sale' => ['sometimes', 'boolean'],                       // switch the Redis flash-sale gate on / off
-            'flash_limit_per_customer' => ['nullable', 'integer', 'min:1'],   // max units one customer may hold; null = no limit
+            'flash_sale' => ['sometimes', 'boolean'],
+            'flash_limit_per_customer' => ['nullable', 'integer', 'min:1'],
         ]);
 
         $item = InventoryItem::where('variant_id', $variant)->firstOrFail();
@@ -110,7 +118,7 @@ class StockController extends Controller
             $gate = app(FlashSaleGate::class);
 
             $data['flash_sale']
-                ? $gate->prime($variant, app(AvailabilityService::class)->availableFor($variant))   // counter = what is available now
+                ? $gate->prime($variant, app(AvailabilityService::class)->availableFor($variant))
                 : $gate->forget($variant);
         }
 

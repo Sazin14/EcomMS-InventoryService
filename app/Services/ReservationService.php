@@ -3,23 +3,18 @@
 namespace App\Services;
 
 use App\Exceptions\InsufficientStockException;
+use App\Exceptions\StockMismatchException;
 use App\Models\InventoryItem;
+use App\Models\Preorder;
 use App\Models\Reservation;
 use App\Models\StockLevel;
 use App\Models\StockMovement;
 use App\Services\Concerns\FailsValidation;
+use App\Support\Outbox;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
+use Throwable;
 
-/**
- * Called by the Order service:
- *   reserve   -> checkout started   (stock held, expires)
- *   confirm   -> payment succeeded  (held until shipped)
- *   release   -> cancelled / payment failed
- *   fulfil    -> shipped            (stock leaves the warehouse)
- *   expireStale (scheduled)         -> unpaid reservations free their stock
- * Every call is safe to repeat.
- */
 class ReservationService
 {
     use FailsValidation;
@@ -29,17 +24,22 @@ class ReservationService
         private AvailabilityService $availability,
         private AlertService $alerts,
         private PreorderService $preorders,
+        private FlashSaleGate $flashGate,
     ) {}
 
     /**
-     * @param  array  $items  [['variant_id' => 1, 'quantity' => 2], ...]
-     * @throws InsufficientStockException (409) listing every variant that could not be covered
+     * @param array $items
+     * @param int|null $customerId
+     * @throws InsufficientStockException
      */
-    public function reserve(string $reference, array $items, string $idempotencyKey, ?int $ttlMinutes = null): Reservation
+    public function reserve(string $reference, array $items, string $idempotencyKey, ?int $ttlMinutes = null, ?int $customerId = null): Reservation
     {
-        // Same key again (client retry) -> same reservation, no second hold.
         if ($existing = Reservation::where('idempotency_key', $idempotencyKey)->first()) {
-            return $existing->load('items');
+            if (! in_array($existing->status, [Reservation::RELEASED, Reservation::EXPIRED], true)) {
+                return $existing->load('items');
+            }
+
+            $existing->update(['idempotency_key' => mb_substr($idempotencyKey, 0, 120).'#retired:'.$existing->id]);
         }
 
         $lines = $this->mergeLines($items);
@@ -51,11 +51,14 @@ class ReservationService
 
         $ttl = $ttlMinutes ?? (int) config('inventory.reservation_ttl_minutes', 15);
 
+        $taken = $this->takeFromFlashGate($lines, $customerId);
+
         try {
-            return DB::transaction(function () use ($reference, $lines, $skus, $idempotencyKey, $ttl) {
+            return DB::transaction(function () use ($reference, $lines, $skus, $idempotencyKey, $ttl, $customerId) {
                 $reservation = Reservation::create([
                     'reference' => $reference,
                     'idempotency_key' => $idempotencyKey,
+                    'customer_id' => $customerId,
                     'status' => Reservation::ACTIVE,
                     'expires_at' => now()->addMinutes($ttl),
                 ]);
@@ -63,9 +66,9 @@ class ReservationService
                 $shortages = [];
 
                 foreach ($lines as $variantId => $qty) {
-                    $warehouseId = $this->allocator->reserveLine($variantId, $qty);
+                    $split = $this->allocator->reserve($variantId, $qty);
 
-                    if ($warehouseId === null) {
+                    if ($split === null) {
                         $info = $this->availability->forVariants([$variantId])[$variantId];
                         $shortages[] = [
                             'variant_id' => $variantId,
@@ -78,16 +81,18 @@ class ReservationService
                         continue;
                     }
 
-                    $reservation->items()->create([
-                        'variant_id' => $variantId,
-                        'sku' => $skus[$variantId],
-                        'warehouse_id' => $warehouseId,
-                        'quantity' => $qty,
-                    ]);
+                    foreach ($split as $warehouseId => $part) {
+                        $reservation->items()->create([
+                            'variant_id' => $variantId,
+                            'sku' => $skus[$variantId],
+                            'warehouse_id' => $warehouseId,
+                            'quantity' => $part,
+                        ]);
+                    }
                 }
 
                 if ($shortages) {
-                    throw new InsufficientStockException($shortages);   // rolls everything back
+                    throw new InsufficientStockException($shortages);
                 }
 
                 foreach (array_keys($lines) as $variantId) {
@@ -97,12 +102,70 @@ class ReservationService
                 return $reservation->load('items');
             });
         } catch (UniqueConstraintViolationException) {
-            // Two identical requests raced: the other one won, return its reservation.
+            $this->giveBackToFlashGate($taken, $customerId);
+
             return Reservation::where('idempotency_key', $idempotencyKey)->firstOrFail()->load('items');
+        } catch (Throwable $e) {
+            $this->giveBackToFlashGate($taken, $customerId);
+
+            throw $e;
         }
     }
 
-    /** Payment succeeded: keep the stock until it ships. */
+    /**
+     * @param array<int,int> $lines
+     * @return array<int,int>
+     */
+    private function takeFromFlashGate(array $lines, ?int $customerId): array
+    {
+        $flash = InventoryItem::whereIn('variant_id', array_keys($lines))->where('flash_sale', true)->get()->keyBy('variant_id');
+        $taken = [];
+
+        foreach ($lines as $variantId => $qty) {
+            $item = $flash->get($variantId);
+
+            if (! $item) {
+                continue;
+            }
+
+            $result = $this->flashGate->take($variantId, $qty, $customerId, $item->flash_limit_per_customer);
+
+            if ($result === FlashSaleGate::OK) {
+                $taken[$variantId] = $qty;
+
+                continue;
+            }
+
+            if ($result === FlashSaleGate::UNKNOWN) {
+                continue;
+            }
+
+            $this->giveBackToFlashGate($taken, $customerId);
+
+            if ($result === FlashSaleGate::LIMIT) {
+                $this->fail('items', "Limit reached: at most {$item->flash_limit_per_customer} unit(s) of variant {$variantId} per customer in this sale.");
+            }
+
+            throw new InsufficientStockException([[
+                'variant_id' => $variantId,
+                'requested' => $qty,
+                'available' => 0,
+                'can_preorder' => false,
+                'expected_restock_at' => null,
+            ]]);
+        }
+
+        return $taken;
+    }
+
+    /** @param array<int,int> $taken */
+    private function giveBackToFlashGate(array $taken, ?int $customerId): void
+    {
+        foreach ($taken as $variantId => $qty) {
+            $this->flashGate->giveBack($variantId, $qty, $customerId);
+        }
+    }
+
     public function confirm(int $id): Reservation
     {
         return DB::transaction(function () use ($id) {
@@ -116,21 +179,17 @@ class ReservationService
                 $this->fail('reservation', "Reservation is {$r->status}; cannot confirm.");
             }
 
-            // Even if expires_at just passed: the stock is still held (the expiry job has not run),
-            // so the customer who already paid keeps it.
             $r->update(['status' => Reservation::CONFIRMED, 'expires_at' => null]);
 
             return $r->load('items');
         });
     }
 
-    /** Cancelled or payment failed: give the stock back. */
     public function release(int $id): Reservation
     {
         return DB::transaction(fn () => $this->releaseHold($id, Reservation::RELEASED));
     }
 
-    /** Shipped: stock leaves the warehouse. */
     public function fulfil(int $id): Reservation
     {
         return DB::transaction(function () use ($id) {
@@ -155,7 +214,7 @@ class ReservationService
                     ]);
 
                 if ($updated !== 1) {
-                    throw new \RuntimeException("Stock mismatch while fulfilling variant {$item->variant_id}.");
+                    throw new StockMismatchException("Stock mismatch while fulfilling variant {$item->variant_id}.");
                 }
 
                 StockMovement::create([
@@ -174,11 +233,12 @@ class ReservationService
 
             $r->update(['status' => Reservation::FULFILLED]);
 
+            Preorder::where('reservation_id', $r->id)->where('status', 'allocated')->update(['status' => 'fulfilled']);
+
             return $r->load('items');
         });
     }
 
-    /** Scheduled every minute: unpaid reservations past expires_at free their stock. */
     public function expireStale(): int
     {
         $ids = Reservation::where('status', Reservation::ACTIVE)
@@ -186,7 +246,16 @@ class ReservationService
             ->pluck('id');
 
         foreach ($ids as $id) {
-            DB::transaction(fn () => $this->releaseHold($id, Reservation::EXPIRED));
+            DB::transaction(function () use ($id) {
+                $r = $this->releaseHold($id, Reservation::EXPIRED);
+
+                if ($r->status === Reservation::EXPIRED && $r->wasChanged('status')) {
+                    Outbox::record('inventory.reservation.expired', [
+                        'reference' => $r->reference,
+                        'reservation_id' => $r->id,
+                    ]);
+                }
+            });
         }
 
         return $ids->count();
@@ -197,7 +266,7 @@ class ReservationService
         $r = Reservation::whereKey($id)->lockForUpdate()->firstOrFail();
 
         if ($newStatus === Reservation::EXPIRED && $r->status !== Reservation::ACTIVE) {
-            return $r;   // paid in the meantime: never expire it
+            return $r;
         }
 
         if ($r->status === Reservation::FULFILLED) {
@@ -205,7 +274,7 @@ class ReservationService
         }
 
         if (! in_array($r->status, [Reservation::ACTIVE, Reservation::CONFIRMED], true)) {
-            return $r->load('items');   // already released / expired: nothing to do
+            return $r->load('items');
         }
 
         foreach ($r->items as $item) {
@@ -215,13 +284,18 @@ class ReservationService
                 ->decrement('reserved', $item->quantity);
 
             if ($updated !== 1) {
-                throw new \RuntimeException("Reserved stock mismatch for variant {$item->variant_id}.");
+                throw new StockMismatchException("Reserved stock mismatch for variant {$item->variant_id}.");
             }
         }
 
         $r->update(['status' => $newStatus]);
 
-        // Freed stock goes to customers waiting on a pre-order.
+        $flashIds = InventoryItem::whereIn('variant_id', $r->items->pluck('variant_id'))->where('flash_sale', true)->pluck('variant_id')->all();
+
+        foreach ($r->items->whereIn('variant_id', $flashIds) as $item) {
+            $this->flashGate->giveBack($item->variant_id, $item->quantity, $r->customer_id);
+        }
+
         foreach ($r->items->pluck('variant_id')->unique() as $variantId) {
             $this->preorders->allocate($variantId);
         }
@@ -229,7 +303,6 @@ class ReservationService
         return $r->load('items');
     }
 
-    /** [['variant_id' => 1, 'quantity' => 1], ['variant_id' => 1, 'quantity' => 2]] -> [1 => 3] */
     private function mergeLines(array $items): array
     {
         $lines = [];

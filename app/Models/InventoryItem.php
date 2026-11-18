@@ -11,10 +11,13 @@ class InventoryItem extends Model
         'variant_id', 'sku', 'product_name', 'variant_label',
         'allow_preorder', 'preorder_limit', 'expected_restock_at',
         'catalog_event_at', 'discontinued_at',
+        'flash_sale', 'flash_limit_per_customer',
     ];
 
     protected $casts = [
         'allow_preorder' => 'boolean',
+        'flash_sale' => 'boolean',
+        'flash_limit_per_customer' => 'integer',
         'expected_restock_at' => 'date:Y-m-d',
         'catalog_event_at' => 'datetime',
         'discontinued_at' => 'datetime',

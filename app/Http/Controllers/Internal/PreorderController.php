@@ -11,7 +11,6 @@ class PreorderController extends Controller
 {
     public function __construct(private PreorderService $preorders) {}
 
-    /** The Order service polls this to learn when a pre-order got its stock (status = allocated). */
     public function index(Request $request)
     {
         $data = $request->validate(['reference' => ['required', 'string', 'max:100']]);

@@ -7,17 +7,18 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Reservation extends Model
 {
-    public const ACTIVE = 'active';        // stock held, waiting for payment (has expires_at)
-    public const CONFIRMED = 'confirmed';  // paid; held until shipped (no expiry)
-    public const FULFILLED = 'fulfilled';  // shipped; stock deducted
-    public const RELEASED = 'released';    // cancelled; stock freed
-    public const EXPIRED = 'expired';      // payment never came; stock freed
+    public const ACTIVE = 'active';
+    public const CONFIRMED = 'confirmed';
+    public const FULFILLED = 'fulfilled';
+    public const RELEASED = 'released';
+    public const EXPIRED = 'expired';
 
     protected $fillable = [
         'reference',
         'status',
         'expires_at',
         'idempotency_key',
+        'customer_id',
     ];
 
     protected $casts = [
@@ -34,7 +35,6 @@ class Reservation extends Model
         return $this->status === self::ACTIVE;
     }
 
-    // Only an unpaid (active) reservation can expire.
     public function isExpired(): bool
     {
         return $this->status === self::ACTIVE

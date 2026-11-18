@@ -8,7 +8,6 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // Plain contact data. Nothing in the system calls a supplier: managers buy manually.
         Schema::create('suppliers', function (Blueprint $t) {
             $t->id();
             $t->string('name');

@@ -8,14 +8,13 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // The "return receipt": what came back, from which order, in what condition, who received it.
         Schema::create('stock_returns', function (Blueprint $t) {
             $t->id();
             $t->foreignId('reservation_id')->constrained('reservations')->restrictOnDelete();
-            $t->string('reference', 100)->index();            // order number
-            $t->string('idempotency_key', 150)->unique();     // same key = same return, never counted twice
-            $t->string('reason')->nullable();                 // customer_refused | not_reachable | wrong_item | defective ...
-            $t->string('received_by_type', 50)->nullable();   // staff | order_service
+            $t->string('reference', 100)->index();
+            $t->string('idempotency_key', 150)->unique();
+            $t->string('reason')->nullable();
+            $t->string('received_by_type', 50)->nullable();
             $t->unsignedBigInteger('received_by_id')->nullable();
             $t->timestamps();
         });
@@ -27,7 +26,7 @@ return new class extends Migration
             $t->string('sku', 100);
             $t->foreignId('warehouse_id')->constrained('warehouses')->restrictOnDelete();
             $t->unsignedBigInteger('quantity');
-            $t->string('condition', 20);                      // resellable | damaged
+            $t->string('condition', 20);
             $t->timestamps();
         });
     }

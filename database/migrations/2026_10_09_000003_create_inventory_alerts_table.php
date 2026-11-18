@@ -8,10 +8,9 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // The inventory dashboard's notification list.
         Schema::create('inventory_alerts', function (Blueprint $t) {
             $t->id();
-            $t->string('type', 30);    // low_stock | out_of_stock | preorder_created | preorder_allocated
+            $t->string('type', 30);
             $t->unsignedBigInteger('variant_id');
             $t->string('sku', 100)->nullable();
             $t->integer('quantity')->nullable();

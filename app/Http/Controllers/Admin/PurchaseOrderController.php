@@ -11,7 +11,6 @@ class PurchaseOrderController extends Controller
 {
     public function __construct(private PurchaseOrderService $orders) {}
 
-    /** ?status=  ?supplier_id=  ?search=PO-2026-000001 */
     public function index(Request $request)
     {
         return PurchaseOrder::query()
@@ -43,7 +42,6 @@ class PurchaseOrderController extends Controller
         return response()->json($this->orders->create($data, $this->actor($request)), 201);
     }
 
-    /** A draft pre-filled from the purchase-suggestions report. Optional variant_ids[] picks only some rows. */
     public function fromSuggestions(Request $request)
     {
         $data = $request->validate([
@@ -71,7 +69,6 @@ class PurchaseOrderController extends Controller
         return $this->orders->update($purchaseOrder, $data);
     }
 
-    /** ordered | cancelled | closed. Received / partially_received come from receiving goods. */
     public function changeStatus(Request $request, PurchaseOrder $purchaseOrder)
     {
         $data = $request->validate(['status' => ['required', 'in:ordered,cancelled,closed']]);

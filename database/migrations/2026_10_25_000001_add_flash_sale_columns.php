@@ -10,11 +10,11 @@ return new class extends Migration
     {
         Schema::table('inventory_items', function (Blueprint $t) {
             $t->boolean('flash_sale')->default(false)->index();
-            $t->unsignedInteger('flash_limit_per_customer')->nullable();   // max units one customer may hold; null = no limit
+            $t->unsignedInteger('flash_limit_per_customer')->nullable();
         });
 
         Schema::table('reservations', function (Blueprint $t) {
-            $t->unsignedBigInteger('customer_id')->nullable()->index();    // needed to give the per-customer count back
+            $t->unsignedBigInteger('customer_id')->nullable()->index();
         });
     }
 

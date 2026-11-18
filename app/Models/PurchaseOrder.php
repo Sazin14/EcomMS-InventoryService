@@ -8,14 +8,13 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class PurchaseOrder extends Model
 {
-    public const DRAFT = 'draft';                         // being prepared, editable
-    public const ORDERED = 'ordered';                     // bought from the supplier (manually), goods expected
+    public const DRAFT = 'draft';
+    public const ORDERED = 'ordered';
     public const PARTIALLY_RECEIVED = 'partially_received';
-    public const RECEIVED = 'received';                   // everything arrived
-    public const CLOSED = 'closed';                       // supplier will not send the rest
-    public const CANCELLED = 'cancelled';                 // cancelled before anything arrived
+    public const RECEIVED = 'received';
+    public const CLOSED = 'closed';
+    public const CANCELLED = 'cancelled';
 
-    /** Statuses whose unreceived quantity counts as "already on order". */
     public const OPEN = [self::ORDERED, self::PARTIALLY_RECEIVED];
 
     protected $fillable = [

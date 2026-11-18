@@ -3,8 +3,6 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
 
-// Needs YOUR stock_levels / reservation_items migrations to have run first.
-// PostgreSQL ignores "unsigned", so nothing stopped negative numbers; these checks do.
 return new class extends Migration
 {
     public function up(): void
@@ -15,7 +13,6 @@ return new class extends Migration
         DB::statement('ALTER TABLE reservation_items DROP CONSTRAINT IF EXISTS reservation_items_quantity_positive');
         DB::statement('ALTER TABLE reservation_items ADD CONSTRAINT reservation_items_quantity_positive CHECK (quantity > 0)');
 
-        // The expiry job looks up "status = active AND expires_at < now"
         DB::statement('CREATE INDEX IF NOT EXISTS reservations_status_expires_index ON reservations (status, expires_at)');
     }
 

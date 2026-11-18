@@ -12,16 +12,9 @@ return new class extends Migration
         Schema::create('stock_levels', function (Blueprint $table) {
             $table->id();
 
-            /*
-             * These belong to Product Service.
-             * There is intentionally NO foreign key.
-             */
             $table->unsignedBigInteger('variant_id');
             $table->string('sku', 100);
 
-            /*
-             * This belongs to Inventory Service.
-             */
             $table->foreignId('warehouse_id')
                 ->constrained('warehouses')
                 ->cascadeOnUpdate()
@@ -33,9 +26,6 @@ return new class extends Migration
 
             $table->timestamps();
 
-            /*
-             * One stock row per variant per warehouse.
-             */
             $table->unique(
                 ['variant_id', 'warehouse_id'],
                 'stock_levels_variant_warehouse_unique'
@@ -47,9 +37,6 @@ return new class extends Migration
             $table->index('reorder_level');
         });
 
-        /*
-         * PostgreSQL-level integrity constraints.
-         */
         DB::statement('
             ALTER TABLE stock_levels
             ADD CONSTRAINT stock_levels_reserved_lte_on_hand

@@ -6,17 +6,11 @@ use App\Models\InventoryItem;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 
-/**
- * Query builders for the four inventory reports. Controllers paginate them or stream them as CSV.
- * Stock numbers only count ACTIVE warehouses.
- */
 class ReportService
 {
-    // "available" and "to buy" written out, because SQL cannot filter on a column alias of the same SELECT.
     private const AVAILABLE = 'greatest(on_hand - reserved, 0)';
     private const TO_BUY = 'greatest(pending_preorders + reorder_total - greatest(on_hand - reserved, 0) - on_order, 0)';
 
-    /** 1. Low stock: a warehouse is at or under its own reorder level (includes warehouses that hit zero). */
     public function lowStock(array $f): Builder
     {
         return DB::table('stock_levels as sl')
@@ -37,7 +31,6 @@ class ReportService
             ->orderBy('i.sku');
     }
 
-    /** 2. Out of stock: nothing available in any active warehouse (variants never stocked are included). */
     public function outOfStock(array $f): Builder
     {
         return $this->position()
@@ -50,7 +43,6 @@ class ReportService
             ->orderBy('sku');
     }
 
-    /** 3. Pre-order demand: pending pre-orders per variant, and how much is still not covered. */
     public function preorderDemand(array $f): Builder
     {
         return $this->position()
@@ -63,11 +55,6 @@ class ReportService
             ->orderBy('sku');
     }
 
-    /**
-     * 4. Purchase suggestions (what to order from suppliers):
-     *    to_buy = pending pre-orders + reorder level - available stock - already on order, never below 0.
-     * Free stock first serves waiting pre-orders, then has to reach the reorder level.
-     */
     public function suggestions(array $f = []): Builder
     {
         return $this->position()
@@ -82,7 +69,6 @@ class ReportService
             ->orderBy('sku');
     }
 
-    /** One row per variant with every number the reports need. */
     private function position(): Builder
     {
         $levels = fn (string $column) => "coalesce((select sum(sl.{$column})

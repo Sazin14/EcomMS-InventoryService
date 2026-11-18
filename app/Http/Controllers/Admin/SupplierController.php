@@ -7,12 +7,10 @@ use App\Models\Supplier;
 use App\Services\SupplierService;
 use Illuminate\Http\Request;
 
-/** Suppliers are plain contact records. Deactivate with PUT {"is_active": false}. */
 class SupplierController extends Controller
 {
     public function __construct(private SupplierService $suppliers) {}
 
-    /** ?search=  ?active=1|0 */
     public function index(Request $request)
     {
         return Supplier::query()

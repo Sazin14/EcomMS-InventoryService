@@ -6,10 +6,6 @@ use App\Http\Controllers\Controller;
 use App\Services\ReportService;
 use Illuminate\Http\Request;
 
-/**
- * Every report: JSON page by default, or ?format=csv for a download.
- * Filters: ?search=  (low-stock also ?warehouse_id=)   Paging: ?per_page= (max 200)
- */
 class ReportController extends Controller
 {
     public function __construct(private ReportService $reports) {}
@@ -78,7 +74,6 @@ class ReportController extends Controller
         return $query->paginate(min((int) $request->query('per_page', 50), 200));
     }
 
-    /** Spreadsheet programs run cells that start with = + - @ as formulas; product names are user-typed text. */
     private function safe(mixed $value): mixed
     {
         if (is_bool($value)) {

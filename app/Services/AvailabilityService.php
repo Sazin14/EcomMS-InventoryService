@@ -7,12 +7,11 @@ use App\Models\Preorder;
 use App\Models\StockLevel;
 use Illuminate\Support\Facades\DB;
 
-/** Read-only: how much can be sold, across active warehouses. */
 class AvailabilityService
 {
     /**
      * @return array<int, array{variant_id:int, on_hand:int, reserved:int, available:int, status:string,
-     *                          can_preorder:bool, expected_restock_at:?string}>
+     * can_preorder:bool, expected_restock_at:?string}>
      */
     public function forVariants(array $variantIds): array
     {
@@ -45,7 +44,7 @@ class AvailabilityService
             $row = $totals->get($id);
             $onHand = (int) ($row?->on_hand ?? 0);
             $reserved = (int) ($row?->reserved ?? 0);
-            $reorder = (int) ($row?->reorder_level ?? 0);   // sum of the warehouses' reorder levels
+            $reorder = (int) ($row?->reorder_level ?? 0);
             $available = max(0, $onHand - $reserved);
             $pendingQty = (int) $pending->get($id, 0);
 

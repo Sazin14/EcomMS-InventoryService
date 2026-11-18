@@ -6,6 +6,7 @@ use Closure;
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Redis;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
@@ -79,6 +80,19 @@ class VerifyJwt
             return response()->json([
                 'message' => 'Invalid JWT claims.',
             ], 401);
+        }
+
+        // Logged out before it expired: AuthService puts the token id on this shared list.
+        if (isset($payload->jti)) {
+            try {
+                if (Redis::connection('authz')->exists("revoked-jti:{$payload->jti}")) {
+                    return response()->json([
+                        'message' => 'Token has been revoked.',
+                    ], 401);
+                }
+            } catch (Throwable $e) {
+                report($e);   // Redis down: the signature and expiry checks above still apply
+            }
         }
 
         /*

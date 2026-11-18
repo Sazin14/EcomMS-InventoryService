@@ -14,16 +14,10 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
-/**
- * Purchase orders are a record of what the manager bought manually from a supplier.
- * Status flow:  draft -> ordered -> partially_received -> received      (received/partial are set by receiving)
- *               draft|ordered -> cancelled        partially_received -> closed (supplier will not send the rest)
- */
 class PurchaseOrderService
 {
     use FailsValidation;
 
-    /** Changes a manager may make by hand. Receiving moves the status on its own. */
     private const MANUAL = [
         PurchaseOrder::DRAFT => [PurchaseOrder::ORDERED, PurchaseOrder::CANCELLED],
         PurchaseOrder::ORDERED => [PurchaseOrder::CANCELLED],
@@ -37,7 +31,7 @@ class PurchaseOrderService
         private ReportService $reports,
     ) {}
 
-    /** @param array $data supplier_id, warehouse_id, expected_at?, notes?, items?: [['variant_id', 'quantity', 'unit_cost'?]] */
+    /** @param array $data */
     public function create(array $data, array $actor): PurchaseOrder
     {
         return DB::transaction(function () use ($data, $actor) {
@@ -45,7 +39,7 @@ class PurchaseOrderService
             $this->assertWarehouse((int) $data['warehouse_id']);
 
             $po = PurchaseOrder::create([
-                'number' => 'TMP-'.Str::uuid(),   // replaced right below, once the id is known
+                'number' => 'TMP-'.Str::uuid(),
                 'supplier_id' => $data['supplier_id'],
                 'warehouse_id' => $data['warehouse_id'],
                 'status' => PurchaseOrder::DRAFT,
@@ -62,7 +56,6 @@ class PurchaseOrderService
         });
     }
 
-    /** Draft pre-filled from the "purchase suggestions" report (still editable before ordering). */
     public function createFromSuggestions(array $data, array $actor): PurchaseOrder
     {
         $rows = $this->reports->suggestions(['variant_ids' => $data['variant_ids'] ?? null])->get();
@@ -79,7 +72,6 @@ class PurchaseOrderService
         return $this->create($data, $actor);
     }
 
-    /** Only drafts can be edited; sending "items" replaces the whole item list. */
     public function update(PurchaseOrder $purchaseOrder, array $data): PurchaseOrder
     {
         return DB::transaction(function () use ($purchaseOrder, $data) {
@@ -130,7 +122,7 @@ class PurchaseOrderService
             }
 
             if ($to === PurchaseOrder::CLOSED) {
-                $po->closed_at = now();   // the unreceived rest stops counting as "on order"
+                $po->closed_at = now();
             }
 
             $po->status = $to;
@@ -140,13 +132,7 @@ class PurchaseOrderService
         });
     }
 
-    /**
-     * Goods arrived (possibly only part of the order).
-     * Each line goes through StockService::receive: stock goes up, waiting pre-orders get it first, alerts update.
-     * The same idempotency_key never counts twice.
-     *
-     * @param  array  $lines  [['variant_id' => 4, 'quantity' => 10], ...]
-     */
+    /** @param array $lines */
     public function receive(PurchaseOrder $purchaseOrder, string $idempotencyKey, array $lines, ?string $notes, array $actor): PurchaseOrder
     {
         if ($existing = PurchaseReceipt::where('idempotency_key', $idempotencyKey)->first()) {
@@ -186,7 +172,6 @@ class PurchaseOrderService
                     $item = $items->get($variantId)
                         ?? $this->fail("lines.$i.variant_id", 'This variant is not on the purchase order.');
 
-                    // Atomic guard: never receive more than was ordered.
                     $updated = PurchaseOrderItem::whereKey($item->id)
                         ->whereRaw('quantity_received + ? <= quantity_ordered', [$qty])
                         ->increment('quantity_received', $qty);
@@ -228,7 +213,6 @@ class PurchaseOrderService
                 return $po->load([...self::WITH, 'receipts.items']);
             });
         } catch (UniqueConstraintViolationException) {
-            // two identical requests raced: the other one won
             return $this->replay(PurchaseReceipt::where('idempotency_key', $idempotencyKey)->firstOrFail(), $purchaseOrder);
         }
     }

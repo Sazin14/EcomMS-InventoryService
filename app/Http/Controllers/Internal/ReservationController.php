@@ -7,7 +7,6 @@ use App\Models\Reservation;
 use App\Services\ReservationService;
 use Illuminate\Http\Request;
 
-/** Order service endpoints (protected by the internal key). */
 class ReservationController extends Controller
 {
     public function __construct(private ReservationService $reservations) {}
@@ -17,8 +16,8 @@ class ReservationController extends Controller
         $data = $request->validate([
             'reference' => ['required', 'string', 'max:100'],
             'idempotency_key' => ['required', 'string', 'max:150'],
-            'customer_id' => ['nullable', 'integer', 'min:1'],               // for the flash-sale per-customer limit
-            'ttl_minutes' => ['nullable', 'integer', 'min:1', 'max:4320'],   // COD: e.g. 1440 (24h) while staff confirm by phone
+            'customer_id' => ['nullable', 'integer', 'min:1'],
+            'ttl_minutes' => ['nullable', 'integer', 'min:1', 'max:4320'],
             'items' => ['required', 'array', 'min:1', 'max:50'],
             'items.*.variant_id' => ['required', 'integer'],
             'items.*.quantity' => ['required', 'integer', 'min:1', 'max:1000'],
