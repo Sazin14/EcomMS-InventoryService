@@ -42,7 +42,7 @@ class CheckAuthorization
 
         $key = "authz:staff:{$userId}";
 
-        $cached = Redis::get($key);
+        $cached = Redis::connection('authz')->get($key);
 
         if ($cached === null) {
 
